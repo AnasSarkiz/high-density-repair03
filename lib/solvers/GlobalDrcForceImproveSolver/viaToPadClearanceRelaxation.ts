@@ -68,13 +68,19 @@ const getObstacleZLayers = (
 const zLayersOverlap = (left: number[], right: number[]) =>
   left.some((z) => right.includes(z))
 
-const isSameNetObstacle = (
+const viaIsAttachedToSameNetObstacle = (
   via: ViaNode,
   route: HighDensityRoute,
   obstacle: SimpleRouteJson["obstacles"][number],
-) =>
-  obstacleSharesNet(via.rootConnectionName, obstacle) ||
-  obstacleSharesNet(route.connectionName, obstacle)
+) => {
+  const isSameNet =
+    obstacleSharesNet(via.rootConnectionName, obstacle) ||
+    obstacleSharesNet(route.connectionName, obstacle)
+
+  return (
+    isSameNet && getPointToObstacleDistance(via, obstacle) <= CLEARANCE_EPSILON
+  )
+}
 
 const collectViaNodes = (
   srj: SimpleRouteJson,
@@ -143,7 +149,10 @@ const getViaPadBlockers = (
   if (!route) return blockers
 
   for (const obstacle of srj.obstacles) {
-    if (obstacle.isCopperPour || isSameNetObstacle(via, route, obstacle)) {
+    if (
+      obstacle.isCopperPour ||
+      viaIsAttachedToSameNetObstacle(via, route, obstacle)
+    ) {
       continue
     }
 

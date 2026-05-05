@@ -242,7 +242,7 @@ test("moves a via until its edge clears a different-net pad edge", () => {
   expect(output[0]?.vias[0]?.y).toBeCloseTo(viaPoint.y, 3)
 })
 
-test("does not move a via away from a same-net pad", () => {
+test("moves a via until its edge clears a same-net pad edge when not attached", () => {
   const srj: SimpleRouteJson = {
     bounds: { minX: -2, minY: -2, maxX: 6, maxY: 4 },
     connections: [{ name: "A", pointsToConnect: [] }],
@@ -266,11 +266,11 @@ test("does not move a via away from a same-net pad", () => {
       connectionName: "A",
       route: [
         { x: 0, y: 0, z: 0 },
-        { x: 2, y: 1.56, z: 0 },
-        { x: 2, y: 1.56, z: 1 },
+        { x: 2, y: 1.26, z: 0 },
+        { x: 2, y: 1.26, z: 1 },
         { x: 4, y: 0, z: 1 },
       ],
-      vias: [{ x: 2, y: 1.56 }],
+      vias: [{ x: 2, y: 1.26 }],
       traceThickness: 0.1,
       viaDiameter: 0.3,
     },
@@ -285,9 +285,64 @@ test("does not move a via away from a same-net pad", () => {
   solver.solve()
 
   const output = solver.getOutput()
-  expect(output[0]?.route[1]).toMatchObject({ x: 2, y: 1.56 })
-  expect(output[0]?.route[2]).toMatchObject({ x: 2, y: 1.56 })
-  expect(output[0]?.vias[0]).toMatchObject({ x: 2, y: 1.56 })
+  const route = output[0]?.route ?? []
+  const viaPoint = route[1]!
+  const padBottomEdgeY = 1.5
+  const viaRadius = 0.15
+  const viaEdgeToPadEdgeClearance = padBottomEdgeY - viaPoint.y - viaRadius
+
+  expect(viaEdgeToPadEdgeClearance).toBeGreaterThanOrEqual(0.2)
+  expect(route[2]).toMatchObject({ x: viaPoint.x, y: viaPoint.y })
+  expect(output[0]?.vias[0]?.x).toBeCloseTo(viaPoint.x, 6)
+  expect(output[0]?.vias[0]?.y).toBeCloseTo(viaPoint.y, 3)
+})
+
+test("does not move an attached via centered on a same-net pad", () => {
+  const srj: SimpleRouteJson = {
+    bounds: { minX: -2, minY: -2, maxX: 6, maxY: 4 },
+    connections: [{ name: "A", pointsToConnect: [] }],
+    obstacles: [
+      {
+        type: "rect",
+        center: { x: 2, y: 2 },
+        width: 1,
+        height: 1,
+        layers: ["top"],
+        connectedTo: ["A"],
+      },
+    ],
+    layerCount: 2,
+    minTraceWidth: 0.1,
+    minViaDiameter: 0.3,
+    minViaEdgeToPadEdgeClearance: 0.2,
+  }
+  const hdRoutes = [
+    {
+      connectionName: "A",
+      route: [
+        { x: 0, y: 0, z: 0 },
+        { x: 2, y: 2, z: 0 },
+        { x: 2, y: 2, z: 1 },
+        { x: 4, y: 0, z: 1 },
+      ],
+      vias: [{ x: 2, y: 2 }],
+      traceThickness: 0.1,
+      viaDiameter: 0.3,
+    },
+  ]
+  const solver = new GlobalDrcForceImproveSolver({
+    srj,
+    hdRoutes,
+    maxIterations: 1,
+    drcEvaluator: () => [],
+  })
+
+  solver.solve()
+
+  const output = solver.getOutput()
+  expect(output[0]?.route[1]).toMatchObject({ x: 2, y: 2 })
+  expect(output[0]?.route[2]).toMatchObject({ x: 2, y: 2 })
+  expect(output[0]?.vias[0]).toMatchObject({ x: 2, y: 2 })
 })
 
 test("treats composite root names as same-net when checking pad attachments", () => {
