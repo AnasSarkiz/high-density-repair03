@@ -339,7 +339,7 @@ const getBroadSpatialInteractionDistance = (
     maxViaRadius + maxSegmentRadius + traceClearance,
     maxSegmentRadius * 2 + traceClearance,
     maxSegmentRadius + getTraceToPadEdgeClearance(srj) + CLEARANCE_SLACK,
-    maxViaRadius + getViaEdgeToPadEdgeClearance(srj) + CLEARANCE_SLACK,
+    maxViaRadius + getViaEdgeToPadEdgeClearance(srj)! + CLEARANCE_SLACK,
   )
 }
 
@@ -2064,7 +2064,7 @@ const pushMovablesAwayFromObstacles = (
     srj.minTraceWidth / 2 + getTraceToPadEdgeClearance(srj) + CLEARANCE_SLACK
   const requiredViaObstacleDistance =
     (srj.minViaDiameter ?? 0.3) / 2 +
-    getViaEdgeToPadEdgeClearance(srj) +
+    getViaEdgeToPadEdgeClearance(srj)! +
     CLEARANCE_SLACK
 
   for (const obstacle of srj.obstacles) {
