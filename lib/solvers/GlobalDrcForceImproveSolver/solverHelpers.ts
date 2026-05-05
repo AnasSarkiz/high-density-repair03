@@ -18,6 +18,7 @@ import {
   TRACE_PAD_REPAIR_MAX_MOVE,
   VIA_PAIR_REPAIR_MAX_MOVE,
   getTraceToPadEdgeClearance,
+  getViaEdgeToPadEdgeClearance,
 } from "./solverConfig"
 import {
   clampToBounds,
@@ -316,7 +317,7 @@ const getBroadSpatialInteractionDistance = (
     maxViaRadius + maxSegmentRadius + traceClearance,
     maxSegmentRadius * 2 + traceClearance,
     maxSegmentRadius + getTraceToPadEdgeClearance(srj) + CLEARANCE_SLACK,
-    maxViaRadius + (srj.defaultObstacleMargin ?? 0.1) + CLEARANCE_SLACK,
+    maxViaRadius + getViaEdgeToPadEdgeClearance(srj) + CLEARANCE_SLACK,
   )
 }
 
@@ -2041,7 +2042,7 @@ const pushMovablesAwayFromObstacles = (
     srj.minTraceWidth / 2 + getTraceToPadEdgeClearance(srj) + CLEARANCE_SLACK
   const requiredViaObstacleDistance =
     (srj.minViaDiameter ?? 0.3) / 2 +
-    getTraceToPadEdgeClearance(srj) +
+    getViaEdgeToPadEdgeClearance(srj) +
     CLEARANCE_SLACK
 
   for (const obstacle of srj.obstacles) {

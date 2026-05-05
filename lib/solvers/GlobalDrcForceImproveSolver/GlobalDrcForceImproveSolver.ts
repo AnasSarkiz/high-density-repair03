@@ -24,6 +24,7 @@ import {
   materializeRoutes,
 } from "./solverHelpers"
 import { applyTraceToPadClearanceRelaxation } from "./traceToPadClearanceRelaxation"
+import { applyViaToPadClearanceRelaxation } from "./viaToPadClearanceRelaxation"
 import type {
   DrcEvaluator,
   DrcSnapshot,
@@ -113,7 +114,14 @@ export class GlobalDrcForceImproveSolver extends BaseSolver {
     routes: HighDensityRoute[],
     snapshot: DrcSnapshot,
   ) {
-    const relaxedRoutes = applyTraceToPadClearanceRelaxation(this.srj, routes)
+    const traceRelaxedRoutes = applyTraceToPadClearanceRelaxation(
+      this.srj,
+      routes,
+    )
+    const relaxedRoutes = applyViaToPadClearanceRelaxation(
+      this.srj,
+      traceRelaxedRoutes,
+    )
     const relaxedSnapshot =
       relaxedRoutes === routes
         ? snapshot

@@ -47,6 +47,7 @@ export interface SimpleRouteJson {
   nominalTraceWidth?: number
   minViaDiameter?: number
   minTraceToPadEdgeClearance?: number
+  minViaEdgeToPadEdgeClearance?: number
   defaultObstacleMargin?: number
   obstacles: Obstacle[]
   connections: Array<SimpleRouteConnection>
