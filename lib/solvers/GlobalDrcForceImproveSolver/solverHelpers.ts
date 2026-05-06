@@ -18,6 +18,7 @@ import {
   TRACE_PAD_REPAIR_MAX_MOVE,
   VIA_PAIR_REPAIR_MAX_MOVE,
   getTraceToPadEdgeClearance,
+  getViaEdgeToPadEdgeClearance,
 } from "./solverConfig"
 import {
   clampToBounds,
@@ -37,6 +38,7 @@ import type {
 import type { SimpleRouteJson, SimplifiedPcbTraces } from "../../types"
 import type { HighDensityRoute } from "../../types/high-density-types"
 import { convertHdRouteToSimplifiedRoute } from "../../utils/convertHdRouteToSimplifiedRoute"
+import { mapZToLayerName } from "../../utils/mapZToLayerName"
 
 export const cloneRoutes = (routes: HighDensityRoute[]): MutableRoute[] =>
   routes.map((route) => ({
@@ -191,7 +193,10 @@ export const getDrcSnapshot = (
   }
 }
 
-const collectViaNodes = (routes: MutableRoute[]): ViaNode[] => {
+export const collectViaNodes = (
+  routes: HighDensityRoute[],
+  defaultViaDiameter = 0.3,
+): ViaNode[] => {
   const vias: ViaNode[] = []
 
   for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
@@ -231,9 +236,10 @@ const collectViaNodes = (routes: MutableRoute[]): ViaNode[] => {
         routeIndex,
         rootConnectionName: getRootConnectionName(route),
         pointIndexes: uniquePointIndexes,
+        zLayers: [...new Set(uniquePointIndexes.map((i) => route.route[i]!.z))],
         x: current.x,
         y: current.y,
-        radius: (route.viaDiameter ?? 0.3) / 2,
+        radius: (route.viaDiameter ?? defaultViaDiameter) / 2,
         movable:
           !uniquePointIndexes.includes(0) &&
           !uniquePointIndexes.includes(route.route.length - 1),
@@ -295,6 +301,23 @@ const getObstacleBounds = (
   maxY: obstacle.center.y + obstacle.height / 2,
 })
 
+export const getObstacleZLayers = (
+  obstacle: SimpleRouteJson["obstacles"][number],
+  layerCount: number,
+) => {
+  if (obstacle.zLayers && obstacle.zLayers.length > 0) {
+    return obstacle.zLayers
+  }
+
+  const zLayers = Array.from({ length: layerCount }, (_, z) => z).filter((z) =>
+    obstacle.layers.includes(mapZToLayerName(z, layerCount)),
+  )
+
+  return zLayers.length > 0
+    ? zLayers
+    : Array.from({ length: layerCount }, (_, z) => z)
+}
+
 const getBroadSpatialInteractionDistance = (
   srj: SimpleRouteJson,
   vias: ViaNode[],
@@ -316,7 +339,7 @@ const getBroadSpatialInteractionDistance = (
     maxViaRadius + maxSegmentRadius + traceClearance,
     maxSegmentRadius * 2 + traceClearance,
     maxSegmentRadius + getTraceToPadEdgeClearance(srj) + CLEARANCE_SLACK,
-    maxViaRadius + (srj.defaultObstacleMargin ?? 0.1) + CLEARANCE_SLACK,
+    maxViaRadius + getViaEdgeToPadEdgeClearance(srj)! + CLEARANCE_SLACK,
   )
 }
 
@@ -349,7 +372,7 @@ const projectPointOntoLineSegment = (
 const pointToSegmentProjection = (point: Point, segment: Segment) =>
   projectPointOntoLineSegment(point, segment.start, segment.end)
 
-const getPointToObstacleDistance = (
+export const getPointToObstacleDistance = (
   point: Point,
   obstacle: SimpleRouteJson["obstacles"][number],
 ) => {
@@ -388,7 +411,7 @@ const getNearestObstacleNearPoint = (
   return nearestObstacle?.obstacle
 }
 
-const getRectRepulsion = (
+export const getRectRepulsion = (
   point: Point,
   obstacle: SimpleRouteJson["obstacles"][number],
   requiredDistance: number,
@@ -2041,7 +2064,7 @@ const pushMovablesAwayFromObstacles = (
     srj.minTraceWidth / 2 + getTraceToPadEdgeClearance(srj) + CLEARANCE_SLACK
   const requiredViaObstacleDistance =
     (srj.minViaDiameter ?? 0.3) / 2 +
-    getTraceToPadEdgeClearance(srj) +
+    getViaEdgeToPadEdgeClearance(srj)! +
     CLEARANCE_SLACK
 
   for (const obstacle of srj.obstacles) {

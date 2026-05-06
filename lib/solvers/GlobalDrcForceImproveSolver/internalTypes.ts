@@ -18,6 +18,7 @@ export type ViaNode = {
   routeIndex: number
   rootConnectionName: string
   pointIndexes: number[]
+  zLayers: number[]
   x: number
   y: number
   radius: number

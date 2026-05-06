@@ -21,8 +21,11 @@ export const CLEARANCE_SLACK = 0.015
 export const VIA_PAIR_REPAIR_MAX_MOVE = 0.16
 export const TRACE_PAD_REPAIR_MAX_MOVE = 0.3
 export const PREFERRED_TRACE_TO_PAD_CLEARANCE = 0.16
+export const PREFERRED_VIA_TO_PAD_CLEARANCE = 0.1
 export const getTraceToPadEdgeClearance = (srj: SimpleRouteJson) =>
   srj.minTraceToPadEdgeClearance ?? PREFERRED_TRACE_TO_PAD_CLEARANCE
+export const getViaEdgeToPadEdgeClearance = (srj: SimpleRouteJson) =>
+  srj.minViaEdgeToPadEdgeClearance ?? PREFERRED_VIA_TO_PAD_CLEARANCE
 export const LARGE_DRC_COUNT_THRESHOLD = 20
 export const MAX_DRC_COUNT_PLATEAU_CHECKS = 2
 export const MAX_LARGE_BOARD_BROAD_FALLBACK_MISSES = 2
