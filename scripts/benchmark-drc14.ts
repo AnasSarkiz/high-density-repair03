@@ -1,4 +1,11 @@
 import { writeFileSync } from "node:fs"
+import { cpus } from "node:os"
+import {
+  isMainThread,
+  parentPort,
+  Worker,
+  workerData,
+} from "node:worker_threads"
 import samples from "dataset-drc14"
 import type {
   HighDensityRoute,
@@ -32,6 +39,20 @@ type SampleResult = {
   error?: string
 }
 
+type IndexedSampleResult = SampleResult & { sampleIndex: number }
+
+type WorkerInput = {
+  sampleIndex: number
+  effort: number
+  maxIterations?: number
+}
+
+type WorkerDoneMessage = {
+  type: "done"
+  sampleIndex: number
+  result: SampleResult
+}
+
 type BenchmarkReport = {
   dataset: "drc14"
   sampleCount: number
@@ -47,6 +68,7 @@ type BenchmarkReport = {
   metadata: {
     effort: number
     maxIterations?: number
+    concurrency: number
     scenarioLimitUsed: number
   }
   sampleResults: SampleResult[]
@@ -56,10 +78,11 @@ const formatMs = (ms: number) => `${ms.toFixed(2)}ms`
 
 const printHelp = () => {
   console.log(`Usage:
-  bun scripts/benchmark-drc14.ts [--limit N|all] [--effort N] [--max-iterations N] [--out PATH] [--json] [--fail-on-drc]
+  bun scripts/benchmark-drc14.ts [--limit N|all] [--concurrency N] [--effort N] [--max-iterations N] [--out PATH] [--json] [--fail-on-drc]
 
 Options:
   --limit N|all          Run first N samples, or all samples (default: all)
+  --concurrency N        Number of Bun workers, or "auto"
   --effort N             Solver effort value (default: 1)
   --max-iterations N     Override solver max iterations
   --out PATH             Write JSON benchmark report (default: benchmark-result.json)
@@ -75,6 +98,15 @@ const parseValueArg = (args: string[], flag: string) => {
 
   const index = args.indexOf(flag)
   return index === -1 ? undefined : args[index + 1]
+}
+
+const parseFirstValueArg = (args: string[], flags: string[]) => {
+  for (const flag of flags) {
+    const value = parseValueArg(args, flag)
+    if (value !== undefined) return value
+  }
+
+  return undefined
 }
 
 const parsePositiveNumberArg = (
@@ -117,6 +149,37 @@ const parseLimitArg = (args: string[], sampleCount: number) => {
   }
 
   return Math.min(value, sampleCount)
+}
+
+const getDefaultConcurrency = () => {
+  const rawValue = Bun.env.BENCHMARK_CONCURRENCY
+  if (!rawValue) return Math.max(1, cpus().length)
+  if (rawValue === "auto") return Math.max(1, cpus().length)
+
+  const value = Number(rawValue)
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid BENCHMARK_CONCURRENCY: ${rawValue}`)
+  }
+
+  return value
+}
+
+const parseConcurrencyArg = (args: string[]) => {
+  const rawValue = parseFirstValueArg(args, [
+    "--concurrency",
+    "--concurrent",
+    "--concurent",
+    "--CONCURENT",
+  ])
+  if (rawValue === undefined) return getDefaultConcurrency()
+  if (rawValue === "auto") return Math.max(1, cpus().length)
+
+  const value = Number(rawValue)
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid value for --concurrency: ${rawValue}`)
+  }
+
+  return value
 }
 
 const getLayerZ = (layer: string, layerCount: number) => {
@@ -296,11 +359,13 @@ const buildReport = ({
   results,
   effort,
   maxIterations,
+  concurrency,
   scenarioLimitUsed,
 }: {
   results: SampleResult[]
   effort: number
   maxIterations?: number
+  concurrency: number
   scenarioLimitUsed: number
 }): BenchmarkReport => {
   const succeeded = results.filter((result) => !result.error)
@@ -333,6 +398,7 @@ const buildReport = ({
     metadata: {
       effort,
       ...(maxIterations !== undefined ? { maxIterations } : {}),
+      concurrency,
       scenarioLimitUsed,
     },
     sampleResults: results,
@@ -377,7 +443,151 @@ const logSummary = (report: BenchmarkReport) => {
   console.log(horizontal)
 }
 
-export const runBenchmark = (args: string[] = Bun.argv.slice(2)) => {
+const logSampleResult = (
+  result: SampleResult,
+  sampleNumber: number,
+  sampleCount: number,
+) => {
+  const status = result.error
+    ? `error=${result.error}`
+    : `drc=${result.initialDrcCount}->${result.finalDrcCount} iterations=${result.iterations}`
+  console.log(
+    `[sample] ${sampleNumber}/${sampleCount} ${result.sampleId} traces=${result.traceCount} ${status} time=${formatMs(result.elapsedMs)}`,
+  )
+}
+
+const runSamples = async ({
+  selectedSamples,
+  effort,
+  maxIterations,
+  concurrency,
+}: {
+  selectedSamples: DatasetSample[]
+  effort: number
+  maxIterations?: number
+  concurrency: number
+}) => {
+  const results: IndexedSampleResult[] = []
+  let nextIndex = 0
+  let activeWorkers = 0
+
+  return await new Promise<SampleResult[]>((resolve) => {
+    const finishIfDone = () => {
+      if (
+        nextIndex >= selectedSamples.length &&
+        activeWorkers === 0 &&
+        results.length === selectedSamples.length
+      ) {
+        resolve(
+          results
+            .sort((a, b) => a.sampleIndex - b.sampleIndex)
+            .map(({ sampleIndex: _sampleIndex, ...result }) => result),
+        )
+      }
+    }
+
+    const launchNextWorker = () => {
+      while (
+        activeWorkers < concurrency &&
+        nextIndex < selectedSamples.length
+      ) {
+        const sampleIndex = nextIndex
+        nextIndex += 1
+        activeWorkers += 1
+        let hasResult = false
+
+        const worker = new Worker(new URL(import.meta.url), {
+          workerData: {
+            sampleIndex,
+            effort,
+            ...(maxIterations !== undefined ? { maxIterations } : {}),
+          } satisfies WorkerInput,
+        })
+
+        worker.on("message", (message: WorkerDoneMessage) => {
+          if (message.type !== "done") return
+          hasResult = true
+
+          const sampleNumber = message.sampleIndex + 1
+          logSampleResult(message.result, sampleNumber, selectedSamples.length)
+          results.push({
+            ...message.result,
+            sampleIndex: message.sampleIndex,
+          })
+        })
+
+        worker.on("error", (error) => {
+          hasResult = true
+          const sample = selectedSamples[sampleIndex]
+          const result: SampleResult = {
+            sampleId: sample?.id ?? `sample${sampleIndex + 1}`,
+            traceCount: 0,
+            initialDrcCount: 0,
+            finalDrcCount: 0,
+            improvement: 0,
+            iterations: 0,
+            elapsedMs: 0,
+            error: error instanceof Error ? error.message : String(error),
+          }
+          logSampleResult(result, sampleIndex + 1, selectedSamples.length)
+          results.push({ ...result, sampleIndex })
+        })
+
+        worker.on("exit", () => {
+          if (!hasResult) {
+            const sample = selectedSamples[sampleIndex]
+            const result: SampleResult = {
+              sampleId: sample?.id ?? `sample${sampleIndex + 1}`,
+              traceCount: 0,
+              initialDrcCount: 0,
+              finalDrcCount: 0,
+              improvement: 0,
+              iterations: 0,
+              elapsedMs: 0,
+              error: "Worker exited before returning a result",
+            }
+            logSampleResult(result, sampleIndex + 1, selectedSamples.length)
+            results.push({ ...result, sampleIndex })
+          }
+          activeWorkers -= 1
+          launchNextWorker()
+          finishIfDone()
+        })
+      }
+
+      finishIfDone()
+    }
+
+    launchNextWorker()
+  })
+}
+
+const runWorker = () => {
+  const { sampleIndex, effort, maxIterations } = workerData as WorkerInput
+  const datasetSamples = samples as DatasetSample[]
+  const sample = datasetSamples[sampleIndex]
+
+  const result = sample
+    ? runSample({ sample, effort, maxIterations })
+    : ({
+        sampleId: `sample${sampleIndex + 1}`,
+        traceCount: 0,
+        initialDrcCount: 0,
+        finalDrcCount: 0,
+        improvement: 0,
+        iterations: 0,
+        elapsedMs: 0,
+        error: `Missing dataset sample at index ${sampleIndex}`,
+      } satisfies SampleResult)
+
+  parentPort?.postMessage({
+    type: "done",
+    sampleIndex,
+    result,
+  } satisfies WorkerDoneMessage)
+}
+
+export const runBenchmark = async (args: string[] = Bun.argv.slice(2)) => {
   if (args.includes("-h") || args.includes("--help")) {
     printHelp()
     return
@@ -386,6 +596,7 @@ export const runBenchmark = (args: string[] = Bun.argv.slice(2)) => {
   const datasetSamples = samples as DatasetSample[]
   const limit = parseLimitArg(args, datasetSamples.length)
   const effort = parsePositiveNumberArg(args, "--effort", 1)
+  const concurrency = parseConcurrencyArg(args)
   const maxIterations = parseOptionalPositiveIntegerArg(
     args,
     "--max-iterations",
@@ -396,26 +607,27 @@ export const runBenchmark = (args: string[] = Bun.argv.slice(2)) => {
   const shouldFailOnDrc = args.includes("--fail-on-drc")
 
   const selectedSamples = datasetSamples.slice(0, limit)
+  const effectiveConcurrency = Math.min(
+    concurrency,
+    Math.max(1, selectedSamples.length),
+  )
   console.log(
-    `Starting DRC14 benchmark: samples=${selectedSamples.length} effort=${effort}` +
+    `Starting DRC14 benchmark: samples=${selectedSamples.length} workers=${effectiveConcurrency} effort=${effort}` +
       (maxIterations !== undefined ? ` maxIterations=${maxIterations}` : ""),
   )
 
-  const results = selectedSamples.map((sample, index) => {
-    const result = runSample({ sample, effort, maxIterations })
-    const status = result.error
-      ? `error=${result.error}`
-      : `drc=${result.initialDrcCount}->${result.finalDrcCount} iterations=${result.iterations}`
-    console.log(
-      `[sample] ${index + 1}/${selectedSamples.length} ${result.sampleId} traces=${result.traceCount} ${status} time=${formatMs(result.elapsedMs)}`,
-    )
-    return result
+  const results = await runSamples({
+    selectedSamples,
+    effort,
+    maxIterations,
+    concurrency: effectiveConcurrency,
   })
 
   const report = buildReport({
     results,
     effort,
     maxIterations,
+    concurrency: effectiveConcurrency,
     scenarioLimitUsed: selectedSamples.length,
   })
 
@@ -435,6 +647,8 @@ export const runBenchmark = (args: string[] = Bun.argv.slice(2)) => {
   }
 }
 
-if (import.meta.main) {
-  runBenchmark()
+if (import.meta.main && isMainThread) {
+  await runBenchmark()
+} else if (!isMainThread) {
+  runWorker()
 }
