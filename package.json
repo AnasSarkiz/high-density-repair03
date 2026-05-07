@@ -9,6 +9,7 @@
   "scripts": {
     "start": "cosmos",
     "benchmark": "./benchmark.sh",
+    "benchmark:drc14": "bun scripts/benchmark-drc14.ts",
     "build:site": "cosmos-export",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
@@ -31,6 +32,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "dataset-drc14": "github:tscircuit/dataset-14#6582f636ca61c7fc8bb237cbcd6195076b9b7628",
     "react-cosmos": "^7.3.0",
     "react-cosmos-plugin-vite": "^7.3.0",
     "typescript": "^6.0.3",
