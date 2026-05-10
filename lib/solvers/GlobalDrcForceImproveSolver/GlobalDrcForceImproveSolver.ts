@@ -71,9 +71,71 @@ const getBoardOutlineGraphics = (srj: SimpleRouteJson): GraphicsObject => {
   }
 }
 
+const getErrorCenter = (error: Record<string, unknown>) => {
+  const center = error.center ?? error.pcb_center
+  if (!center || typeof center !== "object") return undefined
+  const maybeCenter = center as Record<string, unknown>
+  return typeof maybeCenter.x === "number" && typeof maybeCenter.y === "number"
+    ? { x: maybeCenter.x, y: maybeCenter.y }
+    : undefined
+}
+
+const getDrcErrorKey = (error: Record<string, unknown>) => {
+  if (typeof error.pcb_error_id === "string" && error.pcb_error_id.length > 0) {
+    return `id:${error.pcb_error_id}`
+  }
+
+  const center = getErrorCenter(error)
+  if (!center) return undefined
+
+  const message = typeof error.message === "string" ? error.message : ""
+  const type =
+    typeof error.type === "string"
+      ? error.type
+      : typeof error.error_type === "string"
+        ? error.error_type
+        : "unknown"
+
+  return [
+    `center:${center.x.toFixed(3)},${center.y.toFixed(3)}`,
+    `type:${type}`,
+    `message:${message}`,
+  ].join("|")
+}
+
+const createDrcIssueCircles = (
+  initialSnapshot: DrcSnapshot,
+  currentSnapshot: DrcSnapshot,
+): NonNullable<GraphicsObject["circles"]> => {
+  const currentIssueKeys = new Set(
+    currentSnapshot.errors
+      .map((error) => getDrcErrorKey(error))
+      .filter((key): key is string => Boolean(key)),
+  )
+
+  return initialSnapshot.errors.flatMap((error) => {
+    const center = getErrorCenter(error)
+    const key = getDrcErrorKey(error)
+    if (!center || !key) return []
+
+    const fixed = !currentIssueKeys.has(key)
+
+    return [
+      {
+        center,
+        radius: 0.18,
+        fill: fixed ? "rgba(22, 163, 74, 0.18)" : "rgba(147, 51, 234, 0.2)",
+        stroke: fixed ? "#16a34a" : "#9333ea",
+        label: fixed ? "fixed-initial-drc" : "initial-drc",
+      },
+    ]
+  })
+}
+
 const routesToGraphics = (
   srj: SimpleRouteJson,
   routes: HighDensityRoute[],
+  drcIssueCircles: NonNullable<GraphicsObject["circles"]> = [],
 ): GraphicsObject => {
   const boardOutlineGraphics = getBoardOutlineGraphics(srj)
 
@@ -119,15 +181,18 @@ const routesToGraphics = (
         }
       }),
     ),
-    circles: routes.flatMap((route) =>
-      route.vias.map((via) => ({
-        center: via,
-        radius: route.viaDiameter / 2,
-        fill: "rgba(15, 23, 42, 0.25)",
-        stroke: "#0f172a",
-        label: route.connectionName,
-      })),
-    ),
+    circles: [
+      ...routes.flatMap((route) =>
+        route.vias.map((via) => ({
+          center: via,
+          radius: route.viaDiameter / 2,
+          fill: "rgba(15, 23, 42, 0.25)",
+          stroke: "#0f172a",
+          label: route.connectionName,
+        })),
+      ),
+      ...drcIssueCircles,
+    ],
     points: srj.connections.flatMap((connection) =>
       connection.pointsToConnect.map((point) => ({
         x: point.x,
@@ -158,6 +223,7 @@ export class GlobalDrcForceImproveSolver extends BaseSolver {
   private drcCountPlateauChecks = 0
   private largeBoardBroadFallbackMisses = 0
   private outputSnapshot: DrcSnapshot | undefined
+  private initialVisualizationSnapshot: DrcSnapshot | undefined
 
   constructor(params: GlobalDrcForceImproveSolverParams) {
     super()
@@ -471,8 +537,34 @@ export class GlobalDrcForceImproveSolver extends BaseSolver {
     return this.outputHdRoutes
   }
 
+  private getInitialVisualizationSnapshot() {
+    this.initialVisualizationSnapshot = getDrcSnapshot(
+      this.srj,
+      this.inputHdRoutes,
+      this.drcEvaluator,
+    )
+    return this.initialVisualizationSnapshot
+  }
+
+  private getCurrentVisualizationSnapshot() {
+    if (this.iterations === 0 && this.outputSnapshot === undefined) {
+      return this.getInitialVisualizationSnapshot()
+    }
+
+    return (
+      this.outputSnapshot ??
+      getDrcSnapshot(this.srj, this.outputHdRoutes, this.drcEvaluator)
+    )
+  }
+
   override visualize(): GraphicsObject {
-    return routesToGraphics(this.srj, this.outputHdRoutes)
+    const initialSnapshot = this.getInitialVisualizationSnapshot()
+    const currentSnapshot = this.getCurrentVisualizationSnapshot()
+    return routesToGraphics(
+      this.srj,
+      this.outputHdRoutes,
+      createDrcIssueCircles(initialSnapshot, currentSnapshot),
+    )
   }
 
   override preview(): GraphicsObject {
