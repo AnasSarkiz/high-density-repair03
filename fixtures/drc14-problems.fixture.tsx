@@ -1,6 +1,5 @@
 import { GenericSolverDebugger } from "@tscircuit/solver-utils/react"
 import samples from "dataset-drc14"
-import type { GraphicsObject } from "graphics-debug"
 import { useMemo, useState } from "react"
 import {
   GlobalDrcForceImproveSolver,
@@ -150,80 +149,6 @@ const sampleToSolverInput = (sample: DatasetSample): SolverInput => {
   }
 }
 
-const layerColor = (z: number) => {
-  if (z === 0) return "#0f766e"
-  if (z === 1) return "#b45309"
-  return "#4f46e5"
-}
-
-const routesToGraphics = (
-  srj: SimpleRouteJson,
-  routes: HighDensityRoute[],
-): GraphicsObject => ({
-  title: "DRC14 route repair",
-  rects: srj.obstacles.map((obstacle) => ({
-    center: obstacle.center,
-    width: obstacle.width,
-    height: obstacle.height,
-    ccwRotationDegrees: obstacle.ccwRotationDegrees,
-    fill: obstacle.connectedTo.length > 0 ? "rgba(2, 132, 199, 0.22)" : "#eee",
-    stroke: "#334155",
-    label: obstacle.connectedTo[0],
-  })),
-  lines: routes.flatMap((route) =>
-    route.route.slice(1).map((point, index) => {
-      const previousPoint = route.route[index]
-      if (!previousPoint) {
-        return {
-          points: [
-            { x: point.x, y: point.y },
-            { x: point.x, y: point.y },
-          ],
-          strokeColor: layerColor(point.z),
-          strokeWidth: route.traceThickness,
-          label: route.connectionName,
-        }
-      }
-      return {
-        points: [
-          { x: previousPoint.x, y: previousPoint.y },
-          { x: point.x, y: point.y },
-        ],
-        strokeColor: layerColor(point.z),
-        strokeWidth: route.traceThickness,
-        label: route.connectionName,
-      }
-    }),
-  ),
-  circles: routes.flatMap((route) =>
-    route.vias.map((via) => ({
-      center: via,
-      radius: route.viaDiameter / 2,
-      fill: "rgba(15, 23, 42, 0.25)",
-      stroke: "#0f172a",
-      label: route.connectionName,
-    })),
-  ),
-  points: srj.connections.flatMap((connection) =>
-    connection.pointsToConnect.map((point) => ({
-      x: point.x,
-      y: point.y,
-      color: "#dc2626",
-      label: connection.name,
-    })),
-  ),
-})
-
-class VisualGlobalDrcForceImproveSolver extends GlobalDrcForceImproveSolver {
-  override visualize(): GraphicsObject {
-    return routesToGraphics(this.srj, this.outputHdRoutes)
-  }
-
-  override preview(): GraphicsObject {
-    return this.visualize()
-  }
-}
-
 const parsePositiveIntegerInput = (value: string) => {
   const parsedValue = Number.parseInt(value, 10)
   return Number.isFinite(parsedValue) && parsedValue > 0
@@ -342,7 +267,7 @@ export default function Drc14ProblemsFixture() {
         <GenericSolverDebugger
           key={`${selectedSample.id ?? safeSampleNumber}-${effort}-${maxIterations ?? "auto"}`}
           createSolver={() =>
-            new VisualGlobalDrcForceImproveSolver({
+            new GlobalDrcForceImproveSolver({
               srj: input.solverInput.srj,
               hdRoutes: input.solverInput.hdRoutes,
               effort,

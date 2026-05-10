@@ -1,4 +1,5 @@
 import { BaseSolver } from "../BaseSolver"
+import type { GraphicsObject } from "graphics-debug"
 import {
   BROAD_FALLBACK_SMALL_ROUTE_LIMIT,
   LARGE_DRC_COUNT_THRESHOLD,
@@ -32,6 +33,111 @@ import type {
 } from "./types"
 import type { SimpleRouteJson } from "../../types"
 import type { HighDensityRoute } from "../../types/high-density-types"
+
+const layerColor = (z: number) => {
+  if (z === 0) return "#FF0000"
+  if (z === 1) return "#0000FF"
+  return "#4f46e5"
+}
+
+const getBoardOutlineGraphics = (srj: SimpleRouteJson): GraphicsObject => {
+  if (srj.outline && srj.outline.length >= 3) {
+    return {
+      polygons: [
+        {
+          points: srj.outline,
+          stroke: "#1d4ed8",
+          fill: "rgba(29, 78, 216, 0.0)",
+          label: "board-outline",
+        },
+      ],
+    }
+  }
+
+  return {
+    rects: [
+      {
+        center: {
+          x: (srj.bounds.minX + srj.bounds.maxX) / 2,
+          y: (srj.bounds.minY + srj.bounds.maxY) / 2,
+        },
+        width: srj.bounds.maxX - srj.bounds.minX,
+        height: srj.bounds.maxY - srj.bounds.minY,
+        stroke: "#1d4ed8",
+        fill: "rgba(29, 78, 216, 0.0)",
+        label: "board-outline",
+      },
+    ],
+  }
+}
+
+const routesToGraphics = (
+  srj: SimpleRouteJson,
+  routes: HighDensityRoute[],
+): GraphicsObject => {
+  const boardOutlineGraphics = getBoardOutlineGraphics(srj)
+
+  return {
+    coordinateSystem: "cartesian",
+    title: "Global DRC Force Improve Solver visualization",
+    rects: [
+      ...(boardOutlineGraphics.rects ?? []),
+      ...srj.obstacles.map((obstacle) => ({
+        center: obstacle.center,
+        width: obstacle.width,
+        height: obstacle.height,
+        ccwRotationDegrees: obstacle.ccwRotationDegrees,
+        fill:
+          obstacle.connectedTo.length > 0 ? "rgba(2, 132, 199, 0.22)" : "#eee",
+        stroke: "#334155",
+        label: obstacle.connectedTo[0],
+      })),
+    ],
+    polygons: boardOutlineGraphics.polygons,
+    lines: routes.flatMap((route) =>
+      route.route.slice(1).map((point, index) => {
+        const previousPoint = route.route[index]
+        if (!previousPoint) {
+          return {
+            points: [
+              { x: point.x, y: point.y },
+              { x: point.x, y: point.y },
+            ],
+            strokeColor: layerColor(point.z),
+            strokeWidth: route.traceThickness,
+            label: route.connectionName,
+          }
+        }
+        return {
+          points: [
+            { x: previousPoint.x, y: previousPoint.y },
+            { x: point.x, y: point.y },
+          ],
+          strokeColor: layerColor(point.z),
+          strokeWidth: route.traceThickness,
+          label: route.connectionName,
+        }
+      }),
+    ),
+    circles: routes.flatMap((route) =>
+      route.vias.map((via) => ({
+        center: via,
+        radius: route.viaDiameter / 2,
+        fill: "rgba(15, 23, 42, 0.25)",
+        stroke: "#0f172a",
+        label: route.connectionName,
+      })),
+    ),
+    points: srj.connections.flatMap((connection) =>
+      connection.pointsToConnect.map((point) => ({
+        x: point.x,
+        y: point.y,
+        color: "#dc2626",
+        label: connection.name,
+      })),
+    ),
+  }
+}
 
 export class GlobalDrcForceImproveSolver extends BaseSolver {
   readonly srj: SimpleRouteJson
@@ -363,5 +469,13 @@ export class GlobalDrcForceImproveSolver extends BaseSolver {
 
   override getOutput() {
     return this.outputHdRoutes
+  }
+
+  override visualize(): GraphicsObject {
+    return routesToGraphics(this.srj, this.outputHdRoutes)
+  }
+
+  override preview(): GraphicsObject {
+    return this.visualize()
   }
 }
